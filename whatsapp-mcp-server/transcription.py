@@ -27,6 +27,16 @@ TRANSCRIPT_MARKER = "[transcript"
 
 DEFAULT_LANGUAGE = "auto"
 
+# ElevenLabs Scribe is not OpenAI-compatible (xi-api-key header, model_id field),
+# so it has its own provider. no_verbatim drops fillers and turns dialect
+# (for example Swiss German) into clean standard text with the facts kept.
+ELEVENLABS_URL = "https://api.elevenlabs.io/v1/speech-to-text"
+ELEVENLABS_DEFAULT_MODEL = "scribe_v3"
+
+# Facts about the last transcription (language, audio seconds), for a caller
+# that reports usage. Reset on every call to transcribe_file.
+last_meta: dict = {}
+
 # Suffixes the bridge uses for voice notes and other audio.
 AUDIO_SUFFIXES = frozenset({".ogg", ".opus", ".m4a", ".mp3", ".wav", ".aac", ".amr"})
 WHISPER_BINARY = "whisper-cli"
@@ -77,8 +87,10 @@ def language() -> str:
 
 def provider_name() -> str:
     provider = os.getenv("WHATSAPP_TRANSCRIPTION_PROVIDER", "whisper_cpp").strip() or "whisper_cpp"
-    if provider not in {"whisper_cpp", "openai_compatible"}:
-        raise TranscriptionError("WHATSAPP_TRANSCRIPTION_PROVIDER must be whisper_cpp or openai_compatible")
+    if provider not in {"whisper_cpp", "openai_compatible", "elevenlabs"}:
+        raise TranscriptionError(
+            "WHATSAPP_TRANSCRIPTION_PROVIDER must be whisper_cpp, openai_compatible or elevenlabs"
+        )
     return provider
 
 
@@ -86,6 +98,8 @@ def configured_model(provider: str) -> str:
     if provider == "whisper_cpp":
         return model_path()
     model = os.getenv("WHATSAPP_TRANSCRIPTION_MODEL", "").strip()
+    if not model and provider == "elevenlabs":
+        return ELEVENLABS_DEFAULT_MODEL
     if not model:
         raise TranscriptionError("Set WHATSAPP_TRANSCRIPTION_MODEL to the model ID served by your endpoint")
     return model
@@ -141,6 +155,58 @@ def transcribe_http(source: Path, model: str) -> str:
     return normalise(text)
 
 
+def audio_seconds(source: Path) -> float | None:
+    """Length of the audio in seconds, from ffprobe, or None."""
+    if shutil.which("ffprobe") is None:
+        return None
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(source)],
+            stdin=subprocess.DEVNULL, capture_output=True, check=False, timeout=30,
+        )
+        return float(result.stdout.decode().strip())
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def transcribe_elevenlabs(source: Path, model: str) -> str:
+    key = os.getenv("WHATSAPP_TRANSCRIPTION_API_KEY", "").strip()
+    if not key:
+        raise TranscriptionError("Set WHATSAPP_TRANSCRIPTION_API_KEY to an ElevenLabs key with Speech to Text access")
+    data = {"model_id": model, "no_verbatim": "true"}
+    lang = os.getenv("WHATSAPP_TRANSCRIPTION_LANGUAGE", "auto").strip()
+    if lang and lang != "auto":
+        data["language_code"] = lang
+    try:
+        with requests.Session() as session, source.open("rb") as audio:
+            session.trust_env = False
+            response = session.post(
+                ELEVENLABS_URL,
+                files={"file": (source.name, audio)},
+                data=data,
+                headers={"xi-api-key": key},
+                timeout=(10, TRANSCRIPTION_TIMEOUT),
+                allow_redirects=False,
+            )
+        with response:
+            if not 200 <= response.status_code < 300:
+                raise TranscriptionError(f"ElevenLabs returned HTTP {response.status_code}")
+            payload = response.json()
+    except (requests.RequestException, ValueError, OSError) as exc:
+        raise TranscriptionError(f"ElevenLabs request failed ({type(exc).__name__})") from None
+    text = payload.get("text") if isinstance(payload, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        raise TranscriptionError("ElevenLabs returned no text")
+    seconds = audio_seconds(source)
+    if seconds is None:
+        ends = [w.get("end") for w in payload.get("words") or [] if isinstance(w, dict) and w.get("end")]
+        seconds = max(ends) if ends else None
+    last_meta.update(
+        {"provider": "elevenlabs", "model": model, "language": payload.get("language_code"), "seconds": seconds}
+    )
+    return normalise(text)
+
+
 def decode_command(source: Path, destination: Path) -> list[str]:
     return [
         "ffmpeg",
@@ -181,8 +247,11 @@ def transcribe_file(
     source = Path(path)
     if not source.is_file():
         raise TranscriptionError(f"Audio file not found: {source}")
+    last_meta.clear()
     if provider == "openai_compatible":
         return transcribe_http(source, model or configured_model(provider))
+    if provider == "elevenlabs":
+        return transcribe_elevenlabs(source, model or configured_model(provider))
     if not ffmpeg_available():
         raise TranscriptionError("FFmpeg is required to decode voice notes for transcription")
     if not whisper_available():

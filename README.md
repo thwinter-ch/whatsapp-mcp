@@ -9,6 +9,25 @@ A Model Context Protocol (MCP) server for WhatsApp, enabling Claude to read and 
 
 > Originally created by [Luke Harries](https://github.com/lharries/whatsapp-mcp). Maintained by [Very Good Plugins](https://verygoodplugins.com/?utm_source=github).
 
+## This fork (thwinter-ch)
+
+A fork of `verygoodplugins/whatsapp-mcp` with two additions. Everything else is upstream.
+
+- **ElevenLabs engine for `transcribe_audio`.** Scribe v3, `no_verbatim=true` (Swiss German comes out as clean standard German), language detected automatically. About 2 s and USD 0.20 per audio hour.
+- **Telegram cost message per voice note** (optional): sender, length, language, cost and the month total. The month total lives in `transcription-cost.json` next to `messages.db`. A failed alert never fails the transcription.
+
+Settings (environment):
+
+| Variable | Value |
+|---|---|
+| `WHATSAPP_TRANSCRIPTION_PROVIDER` | `elevenlabs` |
+| `WHATSAPP_TRANSCRIPTION_API_KEY` | your ElevenLabs key, Speech to Text right only |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | optional; no alert when not set |
+
+Keep the keys in a root-only file (for example a systemd `EnvironmentFile`), never in the repo. Under systemd, also set `HOME` in the bridge unit: the bridge stops at once without it.
+
+Staying current: GitHub's "Sync fork" button (or `git fetch upstream && git merge upstream/main`) pulls new upstream versions. The two additions sit in `whatsapp-mcp-server/transcription.py`, `usage_alert.py` and a few lines in `main.py`.
+
 <p align="center">
   <a href="https://github.com/user-attachments/assets/9475af1d-2369-4315-9ccc-823dba2c5c32"><strong>Watch the WhatsApp MCP demo video</strong></a>
 </p>
