@@ -13,8 +13,8 @@ A Model Context Protocol (MCP) server for WhatsApp, enabling Claude to read and 
 
 A fork of `verygoodplugins/whatsapp-mcp` with two additions. Everything else is upstream.
 
-- **ElevenLabs engine for `transcribe_audio`.** Scribe v3, `no_verbatim=true` (Swiss German comes out as clean standard German), language detected automatically. About 2 s and USD 0.20 per audio hour.
-- **Telegram cost message per voice note** (optional): sender, length, language, cost and the month total. The month total lives in `transcription-cost.json` next to `messages.db`. A failed alert never fails the transcription.
+- **ElevenLabs engine for `transcribe_audio`.** Scribe v3, `no_verbatim=true` (Swiss German comes out as clean standard German), language detected automatically. About 2 s per note and about USD 0.20 per audio hour.
+- **Telegram cost message per voice note** (optional), after each transcription: the chat (contact or group name), length, language, cost and the month total. The month total lives in `transcription-cost.json` next to `messages.db`. A failed alert never fails the transcription.
 
 Settings (environment):
 
