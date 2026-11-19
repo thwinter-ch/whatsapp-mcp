@@ -1,0 +1,43 @@
+name: Sync upstream
+
+# Fork only: every Monday, merge verygoodplugins/whatsapp-mcp main into this fork's main.
+# Clean merge: pushed to main. Conflict: a PR branch is pushed and a PR opened, main stays untouched.
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    if: github.repository == 'thwinter-ch/whatsapp-mcp'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Merge upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "fork-sync"
+          git config user.email "fork-sync@users.noreply.github.com"
+          git remote add upstream https://github.com/verygoodplugins/whatsapp-mcp.git
+          git fetch upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then echo "Already current."; exit 0; fi
+          if git merge --no-edit upstream/main; then
+            git push origin main
+            echo "Merged upstream into main."
+          else
+            git merge --abort
+            BR="sync/upstream-$(date +%Y%m%d)"
+            git checkout -b "$BR" upstream/main
+            git push -f origin "$BR"
+            gh pr create --base main --head "$BR" \
+              --title "chore: sync upstream (conflict, needs a manual merge)" \
+              --body "The weekly upstream merge hit a conflict with this fork's additions. Merge main into this branch, fix the conflict, then merge." || true
+          fi
