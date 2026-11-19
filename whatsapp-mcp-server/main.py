@@ -9,6 +9,7 @@ from pydantic import Field
 
 import media_preview
 import transcription
+import usage_alert
 from mcp_config import resolve_host, resolve_port, resolve_transport
 from parent_watchdog import install_stdio_parent_watchdog
 from whatsapp import (
@@ -466,22 +467,42 @@ def send_audio_message(recipient: str, media_path: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def download_media(message_id: str, chat_jid: str) -> dict[str, Any]:
-    """Download media from a WhatsApp message and get the local file path.
+def download_media(message_id: str, chat_jid: str, include_data: bool = True) -> dict[str, Any]:
+    """Download media from a WhatsApp message and return the file itself.
 
     Args:
         message_id: The ID of the message containing the media
         chat_jid: The JID of the chat containing the message
+        include_data: Return the file content as base64 in data_base64 (default True).
+            Files above 15 MB are never inlined.
 
     Returns:
-        A dictionary containing success status, a status message, and the file path if successful
+        A dictionary with success, message, file_path (on the server), filename,
+        mime_type, size_bytes and, when included, data_base64
     """
-    file_path = whatsapp_download_media(message_id, chat_jid)
+    import base64
+    import mimetypes
 
-    if file_path:
-        return {"success": True, "message": "Media downloaded successfully", "file_path": file_path}
-    else:
+    file_path = whatsapp_download_media(message_id, chat_jid)
+    if not file_path:
         return {"success": False, "message": "Failed to download media"}
+    # Remote clients cannot open a path on the server, so the bytes travel in the reply.
+    size_bytes = os.path.getsize(file_path)
+    result = {
+        "success": True,
+        "message": "Media downloaded successfully",
+        "file_path": file_path,
+        "filename": os.path.basename(file_path),
+        "mime_type": mimetypes.guess_type(file_path)[0] or "application/octet-stream",
+        "size_bytes": size_bytes,
+    }
+    if include_data:
+        if size_bytes > 15 * 1024 * 1024:
+            result["message"] += "; above the 15 MB inline limit, so data_base64 is omitted"
+        else:
+            with open(file_path, "rb") as f:
+                result["data_base64"] = base64.b64encode(f.read()).decode("ascii")
+    return result
 
 
 @mcp.tool()
@@ -577,6 +598,9 @@ def transcribe_audio(message_id: str, chat_jid: str, force: bool = False) -> dic
             text = transcription.transcribe_file(file_path, work_dir, model=model, provider=provider)
     except transcription.TranscriptionError as exc:
         return {"success": False, "message": str(exc)}
+
+    if transcription.last_meta:
+        usage_alert.send(MESSAGES_DB_PATH, chat_jid, dict(transcription.last_meta))
 
     if not transcription.store_transcript(MESSAGES_DB_PATH, message_id, chat_jid, text, model, provider=provider):
         # The words are worth returning even when the row could not be updated,
