@@ -58,7 +58,9 @@ def send(db_path: str, chat_jid: str, meta: dict) -> bool:
         seconds = float(meta.get("seconds") or 0)
         rate = float(os.getenv("WHATSAPP_TRANSCRIPTION_USD_PER_HOUR", DEFAULT_USD_PER_HOUR))
         usd = seconds / 3600 * rate
-        ledger = Path(os.getenv("WHATSAPP_TRANSCRIPTION_LEDGER", str(Path(db_path).with_name("transcription-cost.json"))))
+        ledger = Path(
+            os.getenv("WHATSAPP_TRANSCRIPTION_LEDGER", str(Path(db_path).with_name("transcription-cost.json")))
+        )
         month = _add_to_ledger(ledger, seconds, usd)
         text = (
             f"🎙️ WhatsApp voice note transcribed\n"
@@ -75,7 +77,11 @@ def send(db_path: str, chat_jid: str, meta: dict) -> bool:
                 json={"chat_id": chat, "text": text, "disable_web_page_preview": True},
                 timeout=10,
             )
-        print(f"usage_alert: Telegram {'sent' if response.ok else 'failed'} (HTTP {response.status_code})", file=sys.stderr, flush=True)
+        print(
+            f"usage_alert: Telegram {'sent' if response.ok else 'failed'} (HTTP {response.status_code})",
+            file=sys.stderr,
+            flush=True,
+        )
         return response.ok
     except Exception as exc:  # never fail a transcription over an alert
         print(f"usage_alert: failed ({type(exc).__name__}: {str(exc)[:120]})", file=sys.stderr, flush=True)
