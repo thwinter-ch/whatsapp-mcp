@@ -1,0 +1,30 @@
+name: PR fail notify
+# Calls the Grok Bot "PR fail fixer" webhook when a listed workflow fails.
+# Add new workflow names to the list below when you add a workflow.
+on:
+  workflow_run:
+    workflows: ["CI","Dependabot Auto-Merge","Release Please","Security","Sync upstream"]
+    types: [completed]
+permissions: {}
+jobs:
+  notify:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call webhook
+        env:
+          WEBHOOK_URL: ${{ secrets.PR_FAIL_WEBHOOK_URL }}
+          WEBHOOK_AUTH: ${{ secrets.PR_FAIL_WEBHOOK_AUTH }}
+          REPO: ${{ github.repository }}
+          WF: ${{ github.event.workflow_run.name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          EVENT: ${{ github.event.workflow_run.event }}
+          PRS: ${{ toJSON(github.event.workflow_run.pull_requests.*.number) }}
+        run: |
+          jq -n --arg repo "$REPO" --arg workflow "$WF" --arg run_id "$RUN_ID" --arg run_url "$RUN_URL" \
+            --arg branch "$BRANCH" --arg sha "$SHA" --arg event "$EVENT" --argjson prs "$PRS" \
+            '{type:"ci-failed",repo:$repo,workflow:$workflow,run_id:$run_id,run_url:$run_url,branch:$branch,sha:$sha,event:$event,pull_requests:$prs}' > body.json
+          curl -sS -f -X POST "$WEBHOOK_URL" -H "$WEBHOOK_AUTH" -H "Content-Type: application/json" --data @body.json
