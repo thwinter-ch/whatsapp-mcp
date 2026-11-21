@@ -88,9 +88,7 @@ def language() -> str:
 def provider_name() -> str:
     provider = os.getenv("WHATSAPP_TRANSCRIPTION_PROVIDER", "whisper_cpp").strip() or "whisper_cpp"
     if provider not in {"whisper_cpp", "openai_compatible", "elevenlabs"}:
-        raise TranscriptionError(
-            "WHATSAPP_TRANSCRIPTION_PROVIDER must be whisper_cpp, openai_compatible or elevenlabs"
-        )
+        raise TranscriptionError("WHATSAPP_TRANSCRIPTION_PROVIDER must be whisper_cpp, openai_compatible or elevenlabs")
     return provider
 
 
@@ -162,7 +160,10 @@ def audio_seconds(source: Path) -> float | None:
     try:
         result = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(source)],
-            stdin=subprocess.DEVNULL, capture_output=True, check=False, timeout=30,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=False,
+            timeout=30,
         )
         return float(result.stdout.decode().strip())
     except (OSError, subprocess.TimeoutExpired, ValueError):
